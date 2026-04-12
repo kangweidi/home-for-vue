@@ -1,0 +1,30 @@
+name: Export Docker Image with Skopeo
+
+# 允许手动触发此工作流
+on:
+  workflow_dispatch: 
+
+jobs:
+  export-and-upload:
+    runs-on: ubuntu-latest
+
+    steps:
+      # 1. 安装 Skopeo (Ubuntu latest 通常自带，但以防万一显式安装)
+      - name: Install Skopeo
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y skopeo
+
+      # 2. 使用 Skopeo 拉取镜像并打包为 OCI archive
+      # 注意：去掉了 /var/... 绝对路径，直接保存在当前工作目录
+      - name: Download and package image
+        run: |
+          skopeo copy docker://ydkn/cups oci-archive:cups.tar
+
+      # 3. 将打包好的 tar 文件作为 Artifact 上传，供本地下载
+      - name: Upload Tarball as Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: cups_tarball # 下载时显示的名称
+          path: cups.tar     # 要上传的文件
+          retention-days: 3      # 文件在 GitHub 上保留 3 天
