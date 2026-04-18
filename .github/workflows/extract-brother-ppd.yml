@@ -1,0 +1,70 @@
+name: Extract Brother DCP-7030 PPD
+
+on:
+  workflow_dispatch: # 允许在 GitHub Actions 页面手动触发
+  push:
+    branches:
+      - main # 如果你的主分支名称是 master，请将其修改为 master
+
+jobs:
+  extract-ppd:
+    runs-on: ubuntu-latest # 基于 Debian 体系的 Ubuntu 环境
+
+    steps:
+      - name: 开启 32 位架构支持并安装环境依赖
+        run: |
+          sudo dpkg --add-architecture i386
+          sudo apt-get update
+          # Brother 的 32 位驱动需要 libc6:i386 支持，同时我们需要启动 cups 服务
+          sudo apt-get install -y cups libc6:i386
+          sudo systemctl start cups
+
+      - name: 下载 Brother 驱动程序
+        run: |
+          # 1. 下载 DCP-7030 的 LPR 驱动 (作为 cupswrapper 安装时的依赖)
+          wget https://download.brother.com/welcome/dlf005511/brdcp7030lpr-2.0.2-1.i386.deb
+          # 2. 下载你提供的 cupswrapper 驱动
+          wget https://download.brother.com/welcome/dlf005513/cupswrapperDCP7030-2.0.2-1.i386.deb
+
+      - name: 安装驱动程序并生成 PPD
+        run: |
+          # 预先创建 Brother 脚本所需的基础目录，避免报错
+          sudo mkdir -p /var/spool/lpd/
+          sudo mkdir -p /usr/share/cups/model/
+          
+          # 强制忽略架构警告进行安装。安装过程会触发脚本执行，自动将 PPD 释放到系统中
+          sudo dpkg -i --force-architecture brdcp7030lpr-2.0.2-1.i386.deb || true
+          sudo dpkg -i --force-architecture cupswrapperDCP7030-2.0.2-1.i386.deb || true
+
+      - name: 提取 PPD 文件
+        run: |
+          mkdir -p output_ppd
+          
+          # 方案 1: 安装成功后，PPD 会生成在以下目录中，我们将其查找并复制出来
+          echo "在系统目录中查找 PPD 文件..."
+          find /usr/share/cups/model /usr/share/ppd /opt/brother -name "*.ppd" -type f -exec cp {} output_ppd/ \;
+          
+          # 方案 2 (容灾备用): 如果系统服务原因导致没生成成功，我们直接用 sed 从驱动包的 bash 脚本源码中切出 PPD 文本
+          if[ -z "$(ls -A output_ppd)" ]; then
+            echo "系统目录未找到 PPD，尝试直接从 deb 脚本源码中提取..."
+            dpkg-deb -x cupswrapperDCP7030-2.0.2-1.i386.deb temp_pkg/
+            WRAPPER_SCRIPT=$(find temp_pkg/ -name "cupswrapper*" -type f | head -n 1)
+            
+            if [ -n "$WRAPPER_SCRIPT" ]; then
+              # Brother 把 PPD 以 Here-Doc 形式写在脚本内，起于 *PPD-Adobe: ，止于 !ENDOFWPP!
+              sed -n '/^\*PPD-Adobe:/,/^!ENDOFWPP!/p' "$WRAPPER_SCRIPT" | grep -v '^!ENDOFWPP!' > output_ppd/DCP7030-extracted.ppd
+            fi
+          fi
+          
+          # 验证是否成功提取
+          ls -la output_ppd/
+          if [ -z "$(ls -A output_ppd)" ]; then
+            echo "提取 PPD 文件失败！"
+            exit 1
+          fi
+
+      - name: 上传 PPD 文件供下载
+        uses: actions/upload-artifact@v4
+        with:
+          name: Brother-DCP-7030-PPD
+          path: output_ppd/*.ppd
