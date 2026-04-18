@@ -1,0 +1,110 @@
+name: Build OpenWrt brlaser IPK
+
+on:
+  workflow_dispatch:
+    inputs:
+      sdk_url:
+        description: '请填入你路由器的 OpenWrt SDK URL (必须与你的路由器架构及 OpenWrt 版本对应)'
+        required: true
+        default: 'https://downloads.openwrt.org/releases/23.05.3/targets/x86/64/openwrt-sdk-23.05.3-x86-64_gcc-12.3.0_musl.Linux-x86_64.tar.xz'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 安装编译环境依赖
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential ccache ecj fastjar file g++ gawk \
+            gettext git java-propose-classpath libelf-dev libncurses5-dev \
+            libncursesw5-dev libssl-dev python3 python3-dev python3-distutils \
+            python3-setuptools rsync subversion swig time unzip wget xsltproc zlib1g-dev
+
+      - name: 下载并解压 OpenWrt SDK
+        run: |
+          wget ${{ github.event.inputs.sdk_url }} -O sdk.tar.xz
+          mkdir openwrt-sdk
+          tar xf sdk.tar.xz -C openwrt-sdk --strip-components=1
+
+      - name: 更新 Feeds 并安装 CUPS 依赖环境
+        run: |
+          cd openwrt-sdk
+          # 更新官方包源，因为 brlaser 编译依赖于 feed 中的 libcups 等库
+          ./scripts/feeds update packages
+          ./scripts/feeds install cups
+
+      - name: 创建 brlaser Package Makefile
+        run: |
+          mkdir -p openwrt-sdk/package/brlaser
+          cat << 'EOF' > openwrt-sdk/package/brlaser/Makefile
+          include $(TOPDIR)/rules.mk
+
+          PKG_NAME:=brlaser
+          PKG_VERSION:=6.2.6
+          PKG_RELEASE:=1
+
+          PKG_SOURCE_PROTO:=git
+          PKG_SOURCE_URL:=https://github.com/pdewacht/brlaser.git
+          PKG_SOURCE_VERSION:=v$(PKG_VERSION)
+          PKG_MIRROR_HASH:=skip
+
+          PKG_MAINTAINER:=GitHub Actions
+          PKG_LICENSE:=GPL-2.0-or-later
+
+          include $(INCLUDE_DIR)/package.mk
+          include $(INCLUDE_DIR)/cmake.mk
+
+          define Package/brlaser
+            SECTION:=net
+            CATEGORY:=Network
+            SUBMENU:=Printing
+            TITLE:=Brother laser printer driver
+            URL:=https://github.com/pdewacht/brlaser
+            DEPENDS:=+cups +libstdcpp
+          endef
+
+          define Package/brlaser/description
+            brlaser is a CUPS driver for Brother laser printers.
+          endef
+
+          # 移除源码中自动执行 cups-config 寻找路径的命令，避免交叉编译时获取到宿主机的错误路径
+          define Build/Prepare
+          	$(call Build/Prepare/Default)
+          	$(SED) '/execute_process.*cups-config/d' $(PKG_BUILD_DIR)/CMakeLists.txt
+          endef
+
+          # 手动指定为系统标准路径
+          CMAKE_OPTIONS += \
+          	-DCUPS_SERVER_BIN=/usr/lib/cups \
+          	-DCUPS_DATA_DIR=/usr/share/cups
+
+          define Package/brlaser/install
+          	$(INSTALL_DIR) $(1)/usr/lib/cups/filter
+          	$(INSTALL_BIN) $(PKG_INSTALL_DIR)/usr/lib/cups/filter/rastertobrlaser $(1)/usr/lib/cups/filter/
+          	$(INSTALL_DIR) $(1)/usr/share/cups/model
+          	$(CP) $(PKG_INSTALL_DIR)/usr/share/cups/model/*.ppd $(1)/usr/share/cups/model/
+          endef
+
+          $(eval $(call BuildPackage,brlaser))
+          EOF
+
+      - name: 编译构建 IPK 软件包
+        run: |
+          cd openwrt-sdk
+          # 初始化配置
+          make defconfig
+          # 单独编译 brlaser 包
+          make package/brlaser/compile V=s
+
+      - name: 收集输出的 IPK
+        run: |
+          mkdir -p output_ipk
+          find openwrt-sdk/bin/packages -name "brlaser_*.ipk" -exec cp {} output_ipk/ \;
+          ls -la output_ipk/
+
+      - name: 上传 IPK 供下载
+        uses: actions/upload-artifact@v4
+        with:
+          name: openwrt-brlaser-ipk
+          path: output_ipk/*.ipk
