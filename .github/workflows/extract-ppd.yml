@@ -27,7 +27,7 @@ jobs:
       - name: Download Brother Driver
         run: |
           echo "正在从提供的链接中解析实际的 .deb 驱动下载地址..."
-          PAGE_URL="https://support.brother.com/g/b/downloadend.aspx?c=cn&lang=zh&prod=dcp7030_all&os=128&dlid=dlf005513_000&flang=9&type3=561"
+          PAGE_URL="https://download.brother.com/welcome/dlf005513/cupswrapperDCP7030-2.0.2-1.i386.deb"
           
           # 抓取页面中的真实下载链接
           DEB_URL=$(curl -sL "$PAGE_URL" | grep -oE "https?://download\.brother\.com[^\"]+\.deb" | head -n 1)
