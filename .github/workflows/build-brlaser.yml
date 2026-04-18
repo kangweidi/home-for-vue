@@ -45,7 +45,8 @@ jobs:
           PKG_RELEASE:=1
 
           PKG_SOURCE_PROTO:=git
-          PKG_SOURCE_URL:=https://github.com/pdewacht/brlaser.git
+          # 【修正点 1】：将其替换为当前真正维护 6.x.x 版本的社区 Fork 仓库
+          PKG_SOURCE_URL:=https://github.com/Owl-Maintain/brlaser.git
           PKG_SOURCE_VERSION:=v$(PKG_VERSION)
           PKG_MIRROR_HASH:=skip
 
@@ -60,7 +61,8 @@ jobs:
             CATEGORY:=Network
             SUBMENU:=Printing
             TITLE:=Brother laser printer driver
-            URL:=https://github.com/pdewacht/brlaser
+            # 【修正点 2】：同样更新描述信息中的 URL
+            URL:=https://github.com/Owl-Maintain/brlaser
             DEPENDS:=+cups +libstdcpp
           endef
 
